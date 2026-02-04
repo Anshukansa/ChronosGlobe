@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChronosGlobe | Interactive Real-Time 3D Earth Timezone Visualizer</title>
+    <meta name="description" content="ChronosGlobe is a high-fidelity 3D interactive Earth that visualizes real-time timezones, day/night cycles, and live sunlight across the globe. Search any city or postcode for precise local time.">
+    <meta name="keywords" content="3D Earth, Timezone Map, Live Sunlight, World Clock, Interactive Globe, Three.js, Real-time Earth">
+    <meta name="author" content="ChronosGlobe">
+    <meta property="og:title" content="ChronosGlobe - Live 3D Timezone Explorer">
+    <meta property="og:description" content="Explore the world in real-time. Check local times, visualize day/night terminators, and find cities with precision 3D mapping.">
+    <meta property="og:type" content="website">
+    
+    <!-- JSON-LD Schema for Google Indexing -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "ChronosGlobe",
+      "headline": "Real-Time 3D Earth Timezone Visualizer",
+      "description": "A high-fidelity interactive 3D globe application for visualizing timezones, daylight distribution, and searching local times via city or postcode.",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "All",
+      "featureList": "Real-time sunlight synchronization, 3D Geocoding, Day/Night cycle visualization, High-resolution textures",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000000; font-family: 'Inter', sans-serif; }
+        
+        /* High-End Glassmorphism */
+        .glass-panel {
+            background: rgba(5, 5, 8, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+        }
+
+        .search-input {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            transition: all 0.3s ease;
+            color: white;
+            letter-spacing: 0.02em;
+        }
+        .search-input:focus {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(56, 189, 248, 0.6);
+            outline: none;
+            box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 2px solid rgba(255,255,255,0.1);
+            border-left-color: #38bdf8;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            background: radial-gradient(circle at center, #0a0a10 0%, #000000 100%);
+        }
+        
+        #ui-layer {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+        }
+
+        .interactive-ui { pointer-events: auto; }
+        
+        /* Compact HUD Tooltip */
+        #hover-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: #e2e8f0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            pointer-events: none;
+            transform: translate(20px, 20px);
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            border-left: 2px solid #38bdf8;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            border-right: 1px solid rgba(255,255,255,0.08);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            z-index: 50;
+            font-family: 'Courier New', monospace;
+            white-space: nowrap;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <div id="hover-tooltip"></div>
+
+    <div id="ui-layer" class="flex flex-col justify-between p-4 md:p-6">
+        
+        <!-- Top Section: Search -->
+        <div class="w-full max-w-lg mx-auto flex flex-col gap-2 interactive-ui">
+            <div class="glass-panel rounded-xl p-1.5 flex items-center gap-2 relative z-50">
+                <i class="ph ph-magnifying-glass text-lg text-slate-400 ml-2"></i>
+                <input type="text" id="city-search" placeholder="Search City (e.g. Visnagar) or Postcode (384315)..." 
+                       class="search-input w-full rounded-lg px-3 py-2 text-sm font-medium placeholder-slate-500">
+                <div id="search-loader" class="loader hidden mr-2"></div>
+            </div>
+            
+            <!-- Search Results -->
+            <div id="search-results" class="hidden glass-panel rounded-xl overflow-hidden max-h-60 overflow-y-auto mt-1 absolute top-16 left-4 right-4 md:left-auto md:right-auto md:w-[32rem] z-50 shadow-2xl ring-1 ring-white/10"></div>
+
+            <!-- Toggle Controls -->
+            <div class="flex gap-2 justify-center">
+                <button onclick="toggleSun()" id="btn-sun" class="glass-panel px-4 py-1.5 rounded-full text-[10px] font-bold text-sky-400 border-sky-500/20 hover:bg-sky-500/10 transition-all flex items-center gap-1.5 uppercase tracking-wider shadow-lg">
+                    <i class="ph ph-sun-dim text-sm"></i> Real-Time Sun
+                </button>
+            </div>
+        </div>
+
+        <!-- Attribution -->
+        <div class="absolute bottom-4 right-4 interactive-ui text-[9px] text-slate-700 font-bold tracking-widest hidden md:block mix-blend-screen opacity-60">
+            CHRONOSGLOBE | OPENSTREETMAP
+        </div>
+
+        <!-- Main Info Card (Compacted) -->
+        <div id="info-card" class="interactive-ui glass-panel rounded-2xl p-6 max-w-sm transform transition-all duration-500 translate-y-20 opacity-0 hidden md:block backdrop-blur-3xl relative border-l-2 border-sky-500 shadow-2xl ring-1 ring-white/5">
+            <button onclick="resetView()" class="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors p-1.5 rounded-full hover:bg-white/5">
+                <i class="ph ph-x text-lg"></i>
+            </button>
+            
+            <div class="mb-4">
+                <h2 id="location-name" class="text-xl font-bold text-white tracking-tight leading-none mb-1">Location</h2>
+                <div class="flex items-center gap-1.5">
+                    <i class="ph-fill ph-map-pin text-sky-500 text-xs"></i>
+                    <p id="location-detail" class="text-sky-400 text-[10px] font-bold uppercase tracking-widest">Global</p>
+                </div>
+            </div>
+            
+            <div class="space-y-3">
+                <div class="bg-gradient-to-r from-sky-900/40 to-transparent rounded-xl p-3 border border-sky-500/20">
+                    <div class="text-[9px] text-sky-400 font-bold uppercase tracking-widest mb-0.5 opacity-80">Official Time</div>
+                    <div id="local-time" class="text-4xl font-mono font-medium text-white tracking-tighter">--:--</div>
+                    <div id="local-date" class="text-slate-400 text-xs mt-0.5 font-medium">--</div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-2 text-[10px]">
+                    <div class="bg-white/5 p-2 rounded-lg border border-white/5">
+                        <span class="block text-slate-500 font-bold uppercase tracking-wider mb-0.5">Timezone</span>
+                        <span id="timezone-name" class="font-mono text-white">UTC</span>
+                    </div>
+                    <div class="bg-white/5 p-2 rounded-lg border border-white/5">
+                        <span class="block text-slate-500 font-bold uppercase tracking-wider mb-0.5">Coords</span>
+                        <span id="coords" class="font-mono text-white">0, 0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Mobile Info Sheet -->
+        <div id="mobile-info" class="md:hidden interactive-ui glass-panel rounded-t-3xl p-5 absolute bottom-0 left-0 right-0 transform translate-y-full transition-transform duration-300 border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+            <div class="w-12 h-1 bg-white/10 rounded-full mx-auto mb-4" onclick="resetView()"></div>
+            
+            <div class="flex justify-between items-start mb-4">
+                 <div class="overflow-hidden">
+                    <h2 id="mobile-location" class="text-lg font-bold text-white mb-0.5 truncate">Select Location</h2>
+                    <p id="mobile-detail" class="text-sky-400 text-[10px] font-bold uppercase tracking-widest truncate">Global</p>
+                 </div>
+                 <button onclick="resetView()" class="text-slate-400 p-1.5 bg-white/5 rounded-full"><i class="ph ph-x"></i></button>
+            </div>
+
+            <div class="flex justify-between items-center bg-white/5 p-4 rounded-xl border border-white/5">
+                <div>
+                    <div class="text-[9px] text-sky-400 font-bold uppercase tracking-wider mb-0.5">Official Time</div>
+                    <div id="mobile-time" class="text-3xl font-mono text-white">--:--</div>
+                    <div id="mobile-date" class="text-[10px] text-slate-400 mt-0.5">--</div>
+                </div>
+                <div class="h-10 w-10 rounded-full bg-sky-500/10 flex items-center justify-center text-sky-400">
+                    <i class="ph ph-clock text-xl"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const config = {
+            earthRadius: 5,
+            autoRotateSpeed: 0.5, // OrbitControls speed
+            liveSun: true
+        };
+
+        const state = {
+            selectedCity: null,
+            isDragging: false,
+            mouse: new THREE.Vector2(),
+            canHover: false,
+            mouseX: 0,
+            mouseY: 0
+        };
+
+        // --- 1. Three.js Initialization ---
+        const scene = new THREE.Scene();
+        // scene.fog = new THREE.FogExp2(0x000000, 0.02); // Removed fog for crispness
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // --- 2. Earth Construction ---
+        const earthGroup = new THREE.Group();
+        // Correct alignment: Rotate -90deg so Greenwich (Lon 0) faces +Z (Camera default)
+        earthGroup.rotation.y = -Math.PI / 2;
+        scene.add(earthGroup);
+
+        const textureLoader = new THREE.TextureLoader();
+        const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+        
+        // High-Res Textures
+        const earthMap = textureLoader.load('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg');
+        const earthBump = textureLoader.load('https://unpkg.com/three-globe/example/img/earth-topology.png');
+        const earthSpec = textureLoader.load('https://unpkg.com/three-globe/example/img/earth-water.png');
+        const earthLights = textureLoader.load('https://unpkg.com/three-globe/example/img/earth-night.jpg'); // Night lights
+        
+        // Enhance Texture Quality
+        [earthMap, earthBump, earthSpec, earthLights].forEach(t => {
+            t.anisotropy = maxAnisotropy;
+            t.minFilter = THREE.LinearFilter;
+            t.magFilter = THREE.LinearFilter;
+        });
+
+        // --- DAY LAYER (Base) ---
+        // Ultra-High Segment Geometry for perfect silhouette (256x256)
+        const earthGeo = new THREE.SphereGeometry(config.earthRadius, 256, 256); 
+        
+        const earthMat = new THREE.MeshPhongMaterial({
+            map: earthMap,
+            bumpMap: earthBump,
+            bumpScale: 0.15, // Deeper terrain
+            specularMap: earthSpec,
+            specular: new THREE.Color(0x444444), // Balanced specular
+            shininess: 25, // Sharper water reflections
+        });
+        
+        const earth = new THREE.Mesh(earthGeo, earthMat);
+        earthGroup.add(earth);
+
+        // --- NIGHT LAYER (Overlay) ---
+        const nightGeo = new THREE.SphereGeometry(config.earthRadius + 0.005, 128, 128);
+        const nightVertex = `
+            varying vec3 vNormal;
+            varying vec2 vUv;
+            varying vec3 vViewPosition;
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                vUv = uv;
+                vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                vViewPosition = -mvPosition.xyz;
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `;
+        const nightFragment = `
+            uniform sampler2D nightTexture;
+            uniform vec3 sunDirection;
+            varying vec3 vNormal;
+            varying vec2 vUv;
+            void main() {
+                vec3 normal = normalize(vNormal);
+                float sunDot = dot(normal, sunDirection);
+                float mask = smoothstep(0.2, -0.2, sunDot);
+                vec3 texColor = texture2D(nightTexture, vUv).rgb;
+                gl_FragColor = vec4(texColor, 1.0) * mask * 2.0;
+            }
+        `;
+        const nightUniforms = {
+            nightTexture: { value: earthLights },
+            sunDirection: { value: new THREE.Vector3(1, 0, 0) }
+        };
+        const nightMat = new THREE.ShaderMaterial({
+            uniforms: nightUniforms,
+            vertexShader: nightVertex,
+            fragmentShader: nightFragment,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.FrontSide
+        });
+        const nightEarth = new THREE.Mesh(nightGeo, nightMat);
+        earth.add(nightEarth);
+
+        // --- CLOUDS ---
+        const cloudGeo = new THREE.SphereGeometry(config.earthRadius + 0.06, 128, 128);
+        const cloudMat = new THREE.MeshPhongMaterial({
+            map: textureLoader.load('https://unpkg.com/three-globe/example/img/earth-clouds.png'),
+            transparent: true,
+            opacity: 0.4, // Softer clouds
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        const clouds = new THREE.Mesh(cloudGeo, cloudMat);
+        earthGroup.add(clouds);
+
+        // --- ATMOSPHERE ---
+        const atmVertexShader = `
+            varying vec3 vNormal;
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+        const atmFragmentShader = `
+            varying vec3 vNormal;
+            void main() {
+                float intensity = pow(0.6 - dot(vNormal, vec3(0, 0, 1.0)), 3.0);
+                gl_FragColor = vec4(0.1, 0.5, 0.9, 1.0) * intensity * 1.5;
+            }
+        `;
+        const atmGeo = new THREE.SphereGeometry(config.earthRadius + 1.2, 64, 64);
+        const atmMat = new THREE.ShaderMaterial({
+            vertexShader: atmVertexShader,
+            fragmentShader: atmFragmentShader,
+            blending: THREE.AdditiveBlending,
+            side: THREE.BackSide,
+            transparent: true,
+            depthWrite: false
+        });
+        const atmosphere = new THREE.Mesh(atmGeo, atmMat);
+        scene.add(atmosphere);
+
+        // --- STARS ---
+        const starGeo = new THREE.BufferGeometry();
+        const starCount = 8000;
+        const starPos = new Float32Array(starCount * 3);
+        for(let i=0; i<starCount; i++) {
+            const r = 400 + Math.random() * 400;
+            const theta = 2 * Math.PI * Math.random();
+            const phi = Math.acos(2 * Math.random() - 1);
+            starPos[i*3] = r * Math.sin(phi) * Math.cos(theta);
+            starPos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+            starPos[i*3+2] = r * Math.cos(phi);
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        const starMat = new THREE.PointsMaterial({color: 0xcccccc, size: 0.7, transparent: true, opacity: 0.9, sizeAttenuation: true});
+        const stars = new THREE.Points(starGeo, starMat);
+        scene.add(stars);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x333333); 
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.5); 
+        sunLight.castShadow = true;
+        scene.add(sunLight);
+
+        // Camera
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 5.5; 
+        controls.maxDistance = 25;
+        controls.enablePan = false;
+        controls.autoRotate = true; 
+        controls.autoRotateSpeed = 0.5;
+        camera.position.z = 15;
+
+        // --- 3. Marker System ---
+        function latLonToVector3(lat, lon, radius) {
+            const phi = (90 - lat) * (Math.PI / 180);
+            const theta = (lon + 180) * (Math.PI / 180);
+            const x = -(radius * Math.sin(phi) * Math.cos(theta));
+            const z = (radius * Math.sin(phi) * Math.sin(theta));
+            const y = (radius * Math.cos(phi));
+            return new THREE.Vector3(x, y, z);
+        }
+
+        const searchPinGroup = new THREE.Group();
+        earthGroup.add(searchPinGroup);
+        
+        const pinMat = new THREE.MeshBasicMaterial({ color: 0xff3366 });
+        const pinObj = new THREE.Group();
+        const sGeo = new THREE.CylinderGeometry(0.01, 0.002, 1.2, 8);
+        sGeo.translate(0, 0.6, 0); 
+        const sMesh = new THREE.Mesh(sGeo, pinMat);
+        const hGeo = new THREE.SphereGeometry(0.08, 16, 16);
+        hGeo.translate(0, 1.2, 0); 
+        const hMesh = new THREE.Mesh(hGeo, pinMat);
+        pinObj.add(sMesh);
+        pinObj.add(hMesh);
+        searchPinGroup.add(pinObj);
+        searchPinGroup.visible = false;
+        
+        // --- 4. Sun Positioning ---
+        function updateSunPosition() {
+            if (!config.liveSun) return;
+            const now = new Date();
+            const utcHours = now.getUTCHours();
+            const utcMinutes = now.getUTCMinutes();
+            const totalHours = utcHours + (utcMinutes / 60);
+            const sunAngle = -(totalHours - 12) * (Math.PI / 12); 
+            const dist = 60;
+            const x = Math.sin(sunAngle) * dist;
+            const z = Math.cos(sunAngle) * dist;
+            const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
+            const declination = 23.45 * Math.sin((360/365 * (dayOfYear - 81)) * (Math.PI/180));
+            const y = Math.tan(declination * (Math.PI/180)) * dist;
+            const sunPos = new THREE.Vector3(x, y, z);
+            sunLight.position.copy(sunPos);
+            const localSun = sunPos.clone().applyMatrix4(new THREE.Matrix4().copy(earthGroup.matrixWorld).invert());
+            nightUniforms.sunDirection.value.copy(localSun.normalize());
+        }
+
+        function toggleSun() {
+            config.liveSun = !config.liveSun;
+            const btn = document.getElementById('btn-sun');
+            if(config.liveSun) {
+                btn.classList.add('text-sky-400', 'border-sky-500/20');
+                btn.classList.remove('text-slate-500', 'border-slate-500/20');
+                updateSunPosition();
+            } else {
+                btn.classList.remove('text-sky-400', 'border-sky-500/20');
+                btn.classList.add('text-slate-500', 'border-slate-500/20');
+                sunLight.position.set(20, 10, 20); 
+                nightUniforms.sunDirection.value.set(1, 0.5, 1).normalize();
+            }
+        }
+
+        // --- 5. Region Helper ---
+        function getRegionName(lat, lon) {
+            if (lat < -60) return "Antarctica";
+            if (lat > 80) return "Arctic Circle";
+            if (lon < -30 && lon > -170) {
+                if (lat > 15) return "North America";
+                if (lat > -60) return "South America";
+            }
+            if (lon >= -30 && lon < 60) {
+                if (lat > 35) return "Europe";
+                if (lat > -40) return "Africa";
+            }
+            if (lon >= 60 && lon < 180) {
+                if (lat > 10) return "Asia";
+                if (lat > -50 && lat <= 10) return "Oceania";
+            }
+            if (lat > 0) {
+                if (lon < -170 || lon > 100) return "Pacific Ocean";
+                if (lon < -30 && lon > -80) return "Atlantic Ocean";
+            } else {
+                if (lon < -170 || lon > 120) return "Pacific Ocean";
+                if (lon >= 60 && lon <= 120) return "Indian Ocean";
+                if (lon < 20 && lon > -70) return "Atlantic Ocean";
+            }
+            return "International Waters";
+        }
+
+        // --- 6. Animation ---
+        const raycaster = new THREE.Raycaster();
+        const hoverTooltip = document.getElementById('hover-tooltip');
+
+        function animate() {
+            requestAnimationFrame(animate);
+            clouds.rotation.y += 0.00008;
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        controls.addEventListener('start', () => { state.isDragging = true; });
+        controls.addEventListener('end', () => { state.isDragging = false; });
+
+        window.addEventListener('mousemove', (event) => {
+            state.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            state.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            state.mouseX = event.clientX;
+            state.mouseY = event.clientY;
+
+            const isOverUI = event.target.closest('.interactive-ui');
+            state.canHover = !isOverUI;
+            
+            if (isOverUI) {
+                hoverTooltip.style.opacity = 0;
+                document.body.style.cursor = 'default';
+                return;
+            }
+
+            raycaster.setFromCamera(state.mouse, camera);
+            const intersects = raycaster.intersectObject(earth);
+
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                const localPoint = earthGroup.worldToLocal(point.clone());
+                const lat = 90 - (Math.acos(localPoint.normalize().y) * 180 / Math.PI);
+                const lon = ((Math.atan2(-localPoint.normalize().z, localPoint.normalize().x) * 180 / Math.PI));
+                const region = getRegionName(lat, lon);
+
+                hoverTooltip.innerHTML = `
+                    <div class="font-bold text-sky-400 mb-0.5 tracking-wider uppercase text-[10px]">${region}</div>
+                    <div class="text-[9px] text-slate-400 font-mono">
+                        ${lat.toFixed(2)}, ${lon.toFixed(2)}
+                    </div>
+                `;
+                hoverTooltip.style.left = (state.mouseX + 15) + 'px';
+                hoverTooltip.style.top = (state.mouseY + 15) + 'px';
+                hoverTooltip.style.opacity = 1;
+                document.body.style.cursor = 'crosshair';
+            } else {
+                hoverTooltip.style.opacity = 0;
+                document.body.style.cursor = 'default';
+            }
+        });
+
+        // --- 7. Search Logic ---
+        const searchInput = document.getElementById('city-search');
+        const resultsBox = document.getElementById('search-results');
+        const searchLoader = document.getElementById('search-loader');
+        let debounceTimer;
+
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            const query = e.target.value.trim();
+            if (query.length < 3) {
+                resultsBox.classList.add('hidden');
+                return;
+            }
+            searchLoader.classList.remove('hidden');
+            debounceTimer = setTimeout(() => performSearch(query), 800);
+        });
+
+        async function performSearch(query) {
+            try {
+                const isNumeric = /^\d+$/.test(query);
+                let searchResults = [];
+
+                if (isNumeric) {
+                    const url = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=5`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    searchResults = data;
+                } 
+                
+                if (searchResults.length === 0) {
+                     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=8`;
+                     const res = await fetch(url);
+                     const data = await res.json();
+                     searchResults = data;
+                }
+
+                searchLoader.classList.add('hidden');
+                resultsBox.innerHTML = '';
+                
+                if (searchResults.length === 0) {
+                    resultsBox.innerHTML = '<div class="p-3 text-slate-400 text-xs text-center">No results found.</div>';
+                    resultsBox.classList.remove('hidden');
+                    return;
+                }
+
+                resultsBox.classList.remove('hidden');
+                
+                searchResults.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-center group';
+                    
+                    let primaryName = item.display_name.split(',')[0];
+                    let secondaryInfo = "";
+                    
+                    if (item.address) {
+                        const addr = item.address;
+                        primaryName = addr.suburb || addr.town || addr.city || addr.village || primaryName;
+                        if(addr.postcode) primaryName += ` ${addr.postcode}`;
+                        
+                        const parts = [];
+                        if(addr.state) parts.push(addr.state);
+                        if(addr.country) parts.push(addr.country);
+                        secondaryInfo = parts.join(', ');
+                    } else {
+                        secondaryInfo = item.display_name.split(',').slice(1,3).join(',');
+                    }
+
+                    div.innerHTML = `
+                        <div class="overflow-hidden w-full pr-2">
+                            <div class="flex items-center justify-between mb-0.5">
+                                <span class="text-white text-sm font-semibold truncate group-hover:text-sky-400 transition-colors">${primaryName}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-400 truncate">${secondaryInfo}</div>
+                        </div>
+                    `;
+                    div.onclick = () => processSelection(item);
+                    resultsBox.appendChild(div);
+                });
+            } catch (err) {
+                searchLoader.classList.add('hidden');
+            }
+        }
+
+        async function processSelection(item) {
+            resultsBox.classList.add('hidden');
+            
+            const lat = parseFloat(item.lat);
+            const lon = parseFloat(item.lon);
+            
+            let name = item.display_name.split(',')[0];
+            let country = "Earth";
+            let specificPostcode = null;
+            
+            const queryVal = searchInput.value.trim();
+            const queryPostcode = queryVal.match(/\b\d{4,10}\b/); 
+            if(queryPostcode) specificPostcode = queryPostcode[0];
+
+            if(item.address) {
+                name = item.address.suburb || item.address.town || item.address.city || item.address.village || name;
+                
+                // FORCE SYNC: Ensure label always has city + postcode if available
+                const postcodeToUse = specificPostcode || item.address.postcode;
+                
+                if (postcodeToUse && !name.includes(postcodeToUse)) {
+                    name += ` ${postcodeToUse}`;
+                }
+                
+                country = item.address.country || "Earth";
+            }
+            
+            searchInput.value = name;
+
+            try {
+                const tzRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=auto`);
+                const tzData = await tzRes.json();
+                
+                selectCity({
+                    name: name,
+                    lat: lat,
+                    lon: lon,
+                    tz: tzData.timezone || "UTC",
+                    country: country
+                });
+                
+            } catch(e) {
+                selectCity({ name: name, lat: lat, lon: lon, tz: "UTC", country: country });
+            }
+        }
+
+        function selectCity(city) {
+            state.selectedCity = city;
+            controls.autoRotate = false;
+
+            const targetPos = latLonToVector3(city.lat, city.lon, config.earthRadius);
+            searchPinGroup.visible = true;
+            searchPinGroup.position.copy(targetPos);
+            
+            const tempObj = new THREE.Object3D();
+            tempObj.position.copy(targetPos);
+            tempObj.lookAt(new THREE.Vector3(0,0,0));
+            searchPinGroup.quaternion.copy(tempObj.quaternion);
+            searchPinGroup.rotateX(-Math.PI / 2); 
+
+            const pinWorldPos = new THREE.Vector3();
+            searchPinGroup.getWorldPosition(pinWorldPos);
+            const camPos = pinWorldPos.clone().normalize().multiplyScalar(14.0);
+
+            const startPos = camera.position.clone();
+            const duration = 1500;
+            const startTime = Date.now();
+            
+            function tween() {
+                const now = Date.now();
+                const progress = Math.min((now - startTime) / duration, 1);
+                const ease = 1 - Math.pow(1 - progress, 3);
+                
+                const currentWorldPin = new THREE.Vector3();
+                searchPinGroup.getWorldPosition(currentWorldPin);
+                const currentCamDest = currentWorldPin.clone().normalize().multiplyScalar(14.0);
+                
+                camera.position.lerpVectors(startPos, currentCamDest, ease);
+                controls.update();
+                
+                if(progress < 1) requestAnimationFrame(tween);
+            }
+            tween();
+
+            document.getElementById('location-name').innerText = city.name;
+            document.getElementById('location-detail').innerText = city.country;
+            document.getElementById('timezone-name').innerText = city.tz;
+            document.getElementById('coords').innerText = `${city.lat.toFixed(4)}, ${city.lon.toFixed(4)}`;
+            
+            document.getElementById('mobile-location').innerText = city.name;
+            document.getElementById('mobile-detail').innerText = city.country;
+            
+            updateClock();
+            document.getElementById('info-card').classList.remove('opacity-0', 'translate-y-20');
+            document.getElementById('mobile-info').classList.remove('translate-y-full');
+        }
+
+        function resetView() {
+            state.selectedCity = null;
+            controls.autoRotate = true; 
+            searchPinGroup.visible = false;
+            searchInput.value = '';
+            document.getElementById('info-card').classList.add('opacity-0', 'translate-y-20');
+            document.getElementById('mobile-info').classList.add('translate-y-full');
+            
+            const startPos = camera.position.clone();
+            const endPos = startPos.clone().normalize().multiplyScalar(15);
+            const startTime = Date.now();
+            function zoomOut() {
+                const now = Date.now();
+                const progress = Math.min((now - startTime) / 800, 1);
+                camera.position.lerpVectors(startPos, endPos, progress);
+                if(progress < 1) requestAnimationFrame(zoomOut);
+            }
+            zoomOut();
+            if(window.clockInterval) clearInterval(window.clockInterval);
+        }
+
+        function updateClock() {
+            if(!state.selectedCity) return;
+            const city = state.selectedCity;
+            
+            const update = () => {
+                if(state.selectedCity !== city) return;
+                try {
+                    const now = new Date();
+                    const timeOpts = { timeZone: city.tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+                    const dateOpts = { timeZone: city.tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+                    
+                    const timeStr = new Intl.DateTimeFormat('en-US', timeOpts).format(now);
+                    const dateStr = new Intl.DateTimeFormat('en-US', dateOpts).format(now);
+                    
+                    document.getElementById('local-time').innerText = timeStr;
+                    document.getElementById('local-date').innerText = dateStr;
+                    document.getElementById('mobile-time').innerText = timeStr;
+                    document.getElementById('mobile-date').innerText = dateStr;
+                } catch(e) {}
+            };
+            update();
+            if(window.clockInterval) clearInterval(window.clockInterval);
+            window.clockInterval = setInterval(update, 1000);
+        }
+
+        updateSunPosition();
+        setInterval(updateSunPosition, 60000);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        document.addEventListener('click', (e) => {
+            if(!searchInput.contains(e.target) && !resultsBox.contains(e.target)) {
+                resultsBox.classList.add('hidden');
+            }
+        });
+
+    </script>
+</body>
+</html>
